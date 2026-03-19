@@ -1069,9 +1069,23 @@ fn grouped_matmul[
             _BN >= 128 and static_N == _BN
         ) else _BN
         comptime wgmma_shape = IndexList[3](64, BN, 16)
+        # Use BM=64 with 1 consumer for grouped matmul to increase grid
+        # parallelism along M. The default BM=128 wastes SMs when
+        # max_tokens_per_expert is small (common in MoE inference).
+        # num_consumer=1 since BM=64 matches the wgmma m dimension.
+        comptime config = MatmulConfig[a_type, b_type, c_type, True](
+            block_tile_shape=Index(64, BN, 64),
+            mma_shape=wgmma_shape,
+            cluster_shape=Index(1, 1, 1),
+            num_pipeline_stages=4,
+            num_consumer=1,
+            partitioned_multicast=False,
+        )
 
         grouped_matmul_sm90[
-            wgmma_shape=wgmma_shape, elementwise_lambda_fn=elementwise_lambda_fn
+            wgmma_shape=wgmma_shape,
+            config=config,
+            elementwise_lambda_fn=elementwise_lambda_fn,
         ](
             c,
             a,
