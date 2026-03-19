@@ -415,25 +415,35 @@ fn allreduce_rmsnorm_fp8[
     )
 
     # Dispatch based on column count.
-    comptime hw_max_warps = ctx.default_device_info.max_thread_block_size // WARP_SIZE
+    comptime hw_max_warps = (
+        ctx.default_device_info.max_thread_block_size // WARP_SIZE
+    )
     comptime max_warps_per_block = hw_max_warps
-    comptime threads_per_block = max_warps_per_block * WARP_SIZE
     comptime base_simd_width = simd_width_of[
         in_dtype, target = get_gpu_target()
     ]()
     comptime sw1 = base_simd_width
     comptime sw2 = base_simd_width * 2
 
+    # Right-size threads_per_block: use the minimum block size that covers
+    # all columns. For cols=4096 with sw=8 this gives 512 threads (16 warps)
+    # instead of 1024, halving wasted threads and improving SM occupancy by
+    # allowing more concurrent blocks per SM.
+    comptime half_warps = hw_max_warps // 2
+    comptime half_block = half_warps * WARP_SIZE
+    comptime full_block = max_warps_per_block * WARP_SIZE
+
     # Warp-tiling: each thread handles simd_width elements. Wider simd for
     # larger column counts.
-    if cols <= (WARP_SIZE * sw1 * max_warps_per_block):
+    if cols <= (WARP_SIZE * sw1 * half_warps):
+        # Smaller col counts: half-sized block is sufficient.
         _allreduce_rmsnorm_fp8_launch[
             sw1,
             in_dtype,
             out_dtype,
             scales_dtype,
             ngpus,
-            threads_per_block,
+            half_block,
         ](
             rows,
             cols,
@@ -448,14 +458,38 @@ fn allreduce_rmsnorm_fp8[
             Int(ctx.id()),
             ctx,
         )
-    elif cols <= (WARP_SIZE * sw2 * max_warps_per_block) and cols % sw2 == 0:
+    elif cols <= (WARP_SIZE * sw1 * max_warps_per_block):
+        _allreduce_rmsnorm_fp8_launch[
+            sw1,
+            in_dtype,
+            out_dtype,
+            scales_dtype,
+            ngpus,
+            full_block,
+        ](
+            rows,
+            cols,
+            src_ptrs,
+            output_2d,
+            gamma,
+            epsilon,
+            weight_offset,
+            scale_ub,
+            scale_output_1d,
+            rank_sigs,
+            Int(ctx.id()),
+            ctx,
+        )
+    elif (
+        cols <= (WARP_SIZE * sw2 * max_warps_per_block) and cols % sw2 == 0
+    ):
         _allreduce_rmsnorm_fp8_launch[
             sw2,
             in_dtype,
             out_dtype,
             scales_dtype,
             ngpus,
-            threads_per_block,
+            full_block,
         ](
             rows,
             cols,
