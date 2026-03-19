@@ -426,17 +426,45 @@ fn allreduce_rmsnorm_fp8[
     comptime sw2 = base_simd_width * 2
 
     # Right-size threads_per_block: use the minimum block size that covers
-    # all columns. For cols=4096 with sw=8 this gives 512 threads (16 warps)
-    # instead of 1024, halving wasted threads and improving SM occupancy by
-    # allowing more concurrent blocks per SM.
+    # all columns, and prefer wider SIMD with fewer threads where possible.
+    # For cols=4096 with sw2=16, this gives 256 threads (8 warps) instead of
+    # 1024, reducing block reduction overhead and allowing more concurrent
+    # blocks per SM.
+    comptime quarter_warps = hw_max_warps // 4
     comptime half_warps = hw_max_warps // 2
+    comptime quarter_block = quarter_warps * WARP_SIZE
     comptime half_block = half_warps * WARP_SIZE
     comptime full_block = max_warps_per_block * WARP_SIZE
 
-    # Warp-tiling: each thread handles simd_width elements. Wider simd for
-    # larger column counts.
-    if cols <= (WARP_SIZE * sw1 * half_warps):
-        # Smaller col counts: half-sized block is sufficient.
+    # Warp-tiling: each thread handles simd_width elements. Prefer wider
+    # SIMD (sw2) with fewer threads when alignment allows.
+    if (
+        cols <= (WARP_SIZE * sw2 * quarter_warps) and cols % sw2 == 0
+    ):
+        # Widest SIMD, smallest block (e.g. cols=4096: sw=16, 256 threads).
+        _allreduce_rmsnorm_fp8_launch[
+            sw2,
+            in_dtype,
+            out_dtype,
+            scales_dtype,
+            ngpus,
+            quarter_block,
+        ](
+            rows,
+            cols,
+            src_ptrs,
+            output_2d,
+            gamma,
+            epsilon,
+            weight_offset,
+            scale_ub,
+            scale_output_1d,
+            rank_sigs,
+            Int(ctx.id()),
+            ctx,
+        )
+    elif cols <= (WARP_SIZE * sw1 * half_warps):
+        # Narrow SIMD, half-sized block (e.g. odd col counts <= 4096).
         _allreduce_rmsnorm_fp8_launch[
             sw1,
             in_dtype,
@@ -466,6 +494,31 @@ fn allreduce_rmsnorm_fp8[
             scales_dtype,
             ngpus,
             full_block,
+        ](
+            rows,
+            cols,
+            src_ptrs,
+            output_2d,
+            gamma,
+            epsilon,
+            weight_offset,
+            scale_ub,
+            scale_output_1d,
+            rank_sigs,
+            Int(ctx.id()),
+            ctx,
+        )
+    elif (
+        cols <= (WARP_SIZE * sw2 * half_warps) and cols % sw2 == 0
+    ):
+        # Wide SIMD, half block (e.g. cols=8192: sw=16, 512 threads).
+        _allreduce_rmsnorm_fp8_launch[
+            sw2,
+            in_dtype,
+            out_dtype,
+            scales_dtype,
+            ngpus,
+            half_block,
         ](
             rows,
             cols,
