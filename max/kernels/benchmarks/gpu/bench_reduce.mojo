@@ -91,7 +91,7 @@ fn run_reduce[
         expected_vals[i] = Scalar[dtype](shape[axis]) * Scalar[dtype](1)
 
     var multi_in_buffer = ctx.enqueue_create_buffer[dtype](in_cache_elems)
-    var res_buffer = ctx.enqueue_create_buffer[dtype](in_size)
+    var res_buffer = ctx.enqueue_create_buffer[dtype](out_size)
 
     comptime res_layout = Layout.row_major[rank]()
     var res_device = LayoutTensor[dtype, res_layout](
@@ -194,9 +194,9 @@ fn reduce_add[
 def main():
     comptime dtype = DType._from_str(env_get_string["dtype", "DType.float16"]())
 
-    comptime shape_in_list = env_get_shape["shape", "1x1x4096"]()
+    comptime shape_in_list = env_get_shape["shape", "1x1024x3072"]()
     comptime shape = int_list_to_tuple[shape_in_list]()
-    comptime axis = env_get_int["axis", 1]()
+    comptime axis = env_get_int["axis", 2]()
     comptime cache_busting = True
 
     var m = Bench()
