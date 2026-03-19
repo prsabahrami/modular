@@ -39,7 +39,7 @@ from utils import IndexList
 from utils.numerics import get_accum_type
 from utils.static_tuple import StaticTuple
 from sys import env_get_int
-from sys.info import simd_width_of
+from sys.info import bit_width_of, simd_width_of
 
 
 @always_inline
@@ -327,11 +327,9 @@ fn reduce_kernel[
             Int(row_idx), shape, axis
         )
 
-        # Use vectorized loads when reducing the contiguous (last)
-        # dimension for better memory throughput.
-        comptime contig_load_w = simd_width_of[
-            dtype, target=get_gpu_target()
-        ]()
+        # Use 128-bit vectorized loads when reducing the contiguous
+        # (last) dimension for optimal memory throughput on GPU.
+        comptime contig_load_w = 128 // bit_width_of[dtype]()
         comptime lw = contig_load_w if axis == rank - 1 else simd_width
 
         var row_accum = row_reduce[
