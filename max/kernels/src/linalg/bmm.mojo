@@ -871,46 +871,6 @@ fn _batched_matmul_gpu[
         2
     ].is_static_value
 
-    if batch_size == 1:
-        with Trace[TraceLevel.OP]("batched_matmul_via_matmul"):
-            # If the batch size is 1, then this is just a matmul and we can use the
-            # matmul kernel directly.
-            comptime if elementwise_epilogue_fn:
-                comptime elementwise_epilogue = elementwise_epilogue_fn.value()
-
-                @parameter
-                @__copy_capture(c_buf)
-                fn elementwise_epilogue_fn_wrapper[
-                    dtype: DType, width: Int, *, alignment: Int = 1
-                ](
-                    out_coords: IndexList[2], val: SIMD[dtype, width]
-                ) capturing -> None:
-                    var batch_coords = IndexList[rank](0)
-
-                    batch_coords[rank - 1] = out_coords[1]
-                    batch_coords[rank - 2] = out_coords[0]
-
-                    elementwise_epilogue(batch_coords, val)
-
-                _matmul_gpu[
-                    transpose_b=transpose_b,
-                    elementwise_lambda_fn=elementwise_epilogue_fn_wrapper,
-                ](
-                    _reshape_nd_buffer_with_batch_to_2d(c_buf._to_ndbuffer()),
-                    _reshape_nd_buffer_with_batch_to_2d(a_buf._to_ndbuffer()),
-                    _reshape_nd_buffer_with_batch_to_2d(b_buf._to_ndbuffer()),
-                    ctx=ctx,
-                )
-            else:
-                _matmul_gpu[transpose_b=transpose_b](
-                    _reshape_nd_buffer_with_batch_to_2d(c_buf._to_ndbuffer()),
-                    _reshape_nd_buffer_with_batch_to_2d(a_buf._to_ndbuffer()),
-                    _reshape_nd_buffer_with_batch_to_2d(b_buf._to_ndbuffer()),
-                    ctx=ctx,
-                )
-
-            return
-
     comptime a_k = a_tensor_reshaped.LayoutType._shape_types[2].static_value
     comptime c_n = c_tensor_reshaped.LayoutType._shape_types[2].static_value
 
