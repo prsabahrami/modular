@@ -200,6 +200,10 @@ fn _allreduce_rmsnorm_fp8_kernel_warp_tiling[
         var target = (my_rank + i) % ngpus
         ptrs[i] = src_ptrs[target]
 
+    # Precompute loop-invariant reciprocals to avoid per-row division.
+    var inv_cols = Scalar[accum_type](1.0) / Scalar[accum_type](cols)
+    var eps = epsilon.cast[accum_type]()
+
     # Row loop: each block processes rows with stride = grid_dim.
     # For rows <= grid_dim, the loop body runs exactly once per block.
     var num_blocks = Int(grid_dim.x)
@@ -228,9 +232,7 @@ fn _allreduce_rmsnorm_fp8_kernel_warp_tiling[
         var row_m2 = block.sum[block_size=threads_per_block, broadcast=True](
             thread_m2
         )
-        var norm_factor = rsqrt(
-            (row_m2 / Scalar[accum_type](cols)) + epsilon.cast[accum_type]()
-        )
+        var norm_factor = rsqrt(row_m2 * inv_cols + eps)
 
         # Phase 2: Normalize + find max (preloaded gamma, no global load).
         var normalized = SIMD[accum_type, simd_width](0)
