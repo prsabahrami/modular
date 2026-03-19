@@ -580,7 +580,7 @@ fn reduce_launch[
     # When the row size is smaller than the warp so we can use
     # multiple warps within a block to reduce rows and save shared memory sync
     else:
-        comptime BLOCK_SIZE = env_get_int["MOJO_REDUCTION_BLOCK_SIZE", 128]()
+        comptime BLOCK_SIZE = env_get_int["MOJO_REDUCTION_BLOCK_SIZE", 256]()
         if shape[axis] < WARP_SIZE:
             comptime for ax in range(rank):
                 if axis == ax:
