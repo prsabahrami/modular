@@ -1059,7 +1059,15 @@ fn grouped_matmul[
 
     comptime if is_sm90_kernel_applicable:
         comptime static_N = c.shape.get[1]()
-        comptime BN = _find_largest_bn_for_sm90_matmul[a_type, static_N]()
+        comptime _BN = _find_largest_bn_for_sm90_matmul[a_type, static_N]()
+        # For grouped matmul, when N/BN yields only 1 block in the N
+        # dimension and BN is large, halve BN to double N-parallelism.
+        # Grouped matmul has limited parallelism along M
+        # (max_tokens_per_expert) and Z (num_active_experts), so more
+        # blocks along N helps fill the GPU.
+        comptime BN = _BN // 2 if (
+            _BN >= 128 and static_N == _BN
+        ) else _BN
         comptime wgmma_shape = IndexList[3](64, BN, 16)
 
         grouped_matmul_sm90[
